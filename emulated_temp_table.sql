@@ -1,11 +1,12 @@
-﻿-- Found a way to emulate the Oracle-style persistent temporary table:
---
--- 1. Define a function returning the contents of a temporary table
+﻿-- 1. Define a function returning the contents of a temporary table
 -- 2. Define a view on the function
 -- 3. Define instead of triggers on the view
 
 -- Table structure is like this:
 -- create temporary table if not exists test_temp_idname(id bigint, name varchar) on commit drop;
+
+-- Use a separate schema for the experiments
+create schema if not exists stage;
 
 create or replace function stage.select_temp_idname() returns table(id bigint, name varchar) as $$
 begin

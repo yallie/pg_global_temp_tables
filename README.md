@@ -42,4 +42,43 @@ This approach indeed works. We can select from a function, we can access it via 
 -- id | name
 ```
 
+Still, it's not quite usable:
+
+* We have to add parentheses() after the function name, so we can't just leave Oracle queries as is, and
+* Rows returned by a function are read-only.
+
+To finally fix this, we combine both approaches, a view and a function. The view selects rows from the function, and we can make it updateable by means of the `INSTEAD OF` triggers.
+
+# The complete sample code of a permanent temp table
+
+Here is a working sample:
+
+```sql
+create or replace function stage.select_temp_idname() returns table(id bigint, name varchar) as $$
+begin
+	create temporary table if not exists test_temp_idname(id bigint, name varchar) on commit drop;
+	return query select * from test_temp_idname;
+end;
+$$ language plpgsql set client_min_messages = error;
+
+create or replace view stage.temp_idname as 
+	select * from stage.select_temp_idname();
+
+create or replace function stage.temp_idname_insert() returns trigger as $$
+begin
+	create temporary table if not exists test_temp_idname(id bigint, name varchar) on commit drop;
+	insert into test_temp_idname(id, name) values (new.id, new.name);
+	return new;
+end;
+$$ language plpgsql 
+set client_min_messages to error 
+set search_path to stage;
+
+drop trigger if exists temp_idname_insert on stage.temp_idname;
+create trigger temp_idname_insert 
+	instead of insert on stage.temp_idname
+	for each row
+	execute procedure stage.temp_idname_insert();
+```
+
 To be continued :)
