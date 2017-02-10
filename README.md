@@ -39,7 +39,9 @@ This approach indeed works. We can select from a function, we can access it via 
 
 ```sql
 >select * from stage.select_temp_idname()
+--
 -- id | name
+-- ---+-----
 ```
 
 Still, it's not quite usable:
@@ -59,7 +61,7 @@ begin
 	create temporary table if not exists test_temp_idname(id bigint, name varchar) on commit drop;
 	return query select * from test_temp_idname;
 end;
-$$ language plpgsql set client_min_messages = error;
+$$ language plpgsql;
 
 create or replace view stage.temp_idname as 
 	select * from stage.select_temp_idname();
@@ -70,15 +72,53 @@ begin
 	insert into test_temp_idname(id, name) values (new.id, new.name);
 	return new;
 end;
-$$ language plpgsql 
-set client_min_messages to error 
-set search_path to stage;
+$$ language plpgsql set search_path to stage;
 
 drop trigger if exists temp_idname_insert on stage.temp_idname;
 create trigger temp_idname_insert 
 	instead of insert on stage.temp_idname
 	for each row
 	execute procedure stage.temp_idname_insert();
+```
+
+Finally, we can use the table just like Oracle:
+
+```sql
+>select * from stage.temp_idname
+--
+-- NOTICE: 42P07: relation "test_temp_idname" already exists, skipping
+-- id | name
+-- ---+-----
+
+>insert into stage.temp_idname(id, name) values (1, 'one'), (2, 'two')
+--
+-- NOTICE: 42P07: relation "test_temp_idname" already exists, skipping
+-- (2 rows affected)
+
+>select * from stage.temp_idname
+--
+-- NOTICE: 42P07: relation "test_temp_idname" already exists, skipping
+-- id | name
+-- ---+-----
+-- 1  | one
+-- 2  | two
+```
+
+One minor thing that annoys me is that pesky notice: relation already exists, skipping. We get the notice every time we access the emulated temporary table via `SELECT` or `INSERT` statements. Notices can be suppressed using the `client_min_messages` setting:
+
+```sql
+set client_min_messages = error
+```
+
+But that affects all notices, even meaningful ones. Luckily, Postgres allows specifying settings per function, so that when we enter a function, Postgres applies these settings reverting them back on exit. This way we suppress our notices without affecting the client's session-level setting:
+
+```sql
+create or replace function stage.select_temp_idname() returns table(id bigint, name varchar) as $$
+begin
+	create temporary table if not exists test_temp_idname(id bigint, name varchar) on commit drop;
+	return query select * from test_temp_idname;
+end;
+$$ language plpgsql set client_min_messages = error;
 ```
 
 To be continued :)
