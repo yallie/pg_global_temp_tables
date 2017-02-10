@@ -72,7 +72,7 @@ begin
 	insert into test_temp_idname(id, name) values (new.id, new.name);
 	return new;
 end;
-$$ language plpgsql set search_path to stage;
+$$ language plpgsql;
 
 drop trigger if exists temp_idname_insert on stage.temp_idname;
 create trigger temp_idname_insert 
