@@ -9,7 +9,7 @@ PostgreSQL notion of temporary tables is substantially different from that of Or
 
 Porting large Oracle application relying on many temporary tables can be cumbersome:
 
-* Oracle queries may use `SCHEMA.TABLE` notion for temporary tables, which is not allowed in Postgres. We can omit `SCHEMA` if it's the same as the current user, but we probably have queries that reference other `SCHEMA`ta.
+* Oracle queries may use `SCHEMA.TABLE` notion for temporary tables, which is not allowed in Postgres. We can omit `SCHEMA` if it's the same as the current user, but we are still likely to have queries that reference other schemata.
 * Postgres requires that each temporary table is created within the same session or transaction before it is accessed.
 
 It gets worse if the application is supposed to work with both Postgres and Oracle, so we can't just fix the queries and litter the code with lots of `CREATE TEMPORARY TABLE` statement.
@@ -21,7 +21,7 @@ This library combines a few ideas to emulate Oracle-style temporary tables. Firs
 * A view on a temporary table is automatically created as temporary, even if we omit the `TEMPORARY` keyword. Hence, the restrictions of temporary tables still apply, and we can use schema-qualified names.
 * There are no triggers on `SELECT`, so we can't `SELECT` from a view if the temporary table is not yet created.
 
-Ok, we can't just create a `VIEW` on a temporary table, so let's explore another option: we can define a function returning a table. A function is not temporary, it's defined within a schema, it can create the temporary table as needed and select and return rows from it. The function would look like this:
+Ok, we can't just create a `VIEW` on a temporary table, so let's explore another option: we can define a function returning a table. A function is not temporary, it's defined within a schema, it can create the temporary table as needed and select and return rows from it. The function would look like this (note the `returns table` part of the definition):
 
 ```sql
 -- let's do our experiments in a separate schema
@@ -120,5 +120,58 @@ begin
 end;
 $$ language plpgsql set client_min_messages = error;
 ```
+
+# Creating permanent temporary tables
+
+Let's recap what's needed to create a permanent temporary table residing in a schema:
+
+1. A function returning the contents of a temporary table
+2. A view on the function
+3. Instead of insert/update/delete trigger on the view
+4. Trigger function that does the job of updating the table
+
+To delete the temporary table, we just drop the (1) and (4) functions with cascade options, and the rest is cleaned up automatically.
+
+It's a bit cumbersome to create these each time we need a temporary table, so let's create a function that does the job. Here, we have a new challenge: specifying the table structure can be quite tricky. Suppose we have a function like this:
+
+```sql
+select create_permanent_temp_table(
+	p_schema => 'stage', 
+	p_table_name => 'complex_temp_table', 
+	p_table_structure => '
+		id bigint,
+		name character varying (256),
+		date timestamp(0) with time zone
+	',
+	p_table_pk => ...
+	p_table_pk_columns => ...
+	p_table_indexes => ...
+	etc.
+);
+```
+
+The function have to parse table structure, list of primary key columns, indexes, etc. If the function doesn't validate the provided code, it's vulnerable to SQL injection, but validating the code turns out to require a full-blown SQL parser (for example, columns can have default values specified by arbitrary expressions). Worse, the table specification can change in the future, the syntax will evolve over time, etc. I'd like to avoid that kind of complexity in my utility code, so what's the alternative?
+
+The alternative that comes to my mind is to convert an ordinal temporary table into permanent table. We start with creating a temporary table using native PostgreSQL syntax, then we inspect the structure of the table and recreate it as a permanent object:
+
+```sql
+-- create a table as usual
+create global temporary table if exists complex_temp_table
+(
+	id bigint,
+	name character varying (256),
+	date timestamp(0) with time zone
+)
+on commit drop;
+
+-- create constraints, indexes, etc.
+create unique index if not exists complex_temp_table_uq 
+	on complex_temp_table(id);
+
+-- convert temp table into permanent one
+select create_permanent_temp_table(p_schema => 'stage', p_table_name => 'complex_temp_table');
+```
+
+What's left to us in terms of the validation is to make sure that 'complex_temp_table' is a valid identifier (mind the SQL injection!), and that such relation doesn't exist in the target schema.
 
 To be continued :)
