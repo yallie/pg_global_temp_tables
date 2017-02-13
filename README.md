@@ -172,6 +172,12 @@ create unique index if not exists complex_temp_table_uq
 select create_permanent_temp_table(p_schema => 'stage', p_table_name => 'complex_temp_table');
 ```
 
-What's left to us in terms of the validation is to make sure that 'complex_temp_table' is a valid identifier (mind the SQL injection!), and that such relation doesn't exist in the target schema.
+Inspecting the table structure to generate the `CREATE TABLE` statement involves a few queries to the `information_schema` views:
+
+1. Table properties — `information_schema.tables`
+2. Column names and types — `information_schema.columns`
+3. Primary key — `information_schema.constraint_table_usage`, `constraint_column_usage`, `key_column_usage`.
+ 
+Also, there are lots Postgres-specific tables, views and functions in pg_catalog chema, such as format_type function (these are non-standard, however). What's left in terms of the input validation is to make sure that 'complex_temp_table' is a valid identifier (mind the SQL injection!), and that such relation doesn't exist in the target schema (but Postgres already does that for us automatically).
 
 To be continued :)
