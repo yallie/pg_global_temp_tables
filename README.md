@@ -16,6 +16,10 @@ It gets worse if the application is supposed to work with both Postgres and Orac
 
 # Enter pg_global_temp_tables
 
+TODO: describe the API and its usage
+
+# How does it work
+
 This library combines a few ideas to emulate Oracle-style temporary tables. First, let's define a view and use it instead of a temporary table. A view is a static object and it's defined within a schema, so it supports the `SCHEMA.TABLE` notion used in our Oracle queries. A view can have `INSTEAD OF` triggers which can create temporary table as needed. There are two problems, however:
 
 * A view on a temporary table is automatically created as temporary, even if we omit the `TEMPORARY` keyword. Hence, the restrictions of temporary tables still apply, and we can use schema-qualified names.
@@ -156,17 +160,15 @@ The alternative that comes to my mind is to convert an ordinal temporary table i
 
 ```sql
 -- create a table as usual
-create global temporary table if exists complex_temp_table
+create temporary table if not exists complex_temp_table
 (
-	id bigint,
-	name character varying (256),
-	date timestamp(0) with time zone
+    id bigint,
+    name character varying (256),
+    date timestamp(0) with time zone,
+    constraint complex_temp_table_pk primary key(id)
+    -- or just: primary key (id)
 )
 on commit drop;
-
--- create constraints, indexes, etc.
-create unique index if not exists complex_temp_table_uq 
-	on complex_temp_table(id);
 
 -- convert temp table into permanent one
 select create_permanent_temp_table(p_schema => 'stage', p_table_name => 'complex_temp_table');
@@ -178,6 +180,21 @@ Inspecting the table structure to generate the `CREATE TABLE` statement involves
 2. Column names and types — `information_schema.columns`
 3. Primary key — `information_schema.constraint_table_usage`, `constraint_column_usage`, `key_column_usage`.
  
-Also, there are lots Postgres-specific tables, views and functions in pg_catalog chema, such as format_type function (these are non-standard, however). What's left in terms of the input validation is to make sure that 'complex_temp_table' is a valid identifier (mind the SQL injection!), and that such relation doesn't exist in the target schema (but Postgres already does that for us automatically).
+Also, there are lots Postgres-specific tables, views and functions in pg_catalog chema, such as format_type function (these are non-standard, however). What's left in terms of the input validation is to make sure that 'complex_temp_table' is a valid identifier (mind the SQL injection!), and that such relation doesn't exist in the target schema (but Postgres already does that for us automatically). Here's how to get the columns of the 'complex_temp_table' table:
+
+```sql
+select c.column_name, c.data_type, c.character_maximum_length,
+	c.numeric_precision, c.datetime_precision 
+from information_schema.tables t
+join information_schema.columns c on c.table_name = t.table_name and c.table_schema = t.table_schema
+where t.table_name = 'complex_temp_table'
+order by c.ordinal_position
+
+-- column_name | data_type   | char_max_length | num_precision | date_precision
+-- ------------+-------------+-----------------+---------------+----------------
+-- id          | bigint      | null            | 64            | null
+-- name        | varchar     | 256             | null          | null
+-- date        | timestamptz | null            | null          | 0
+```
 
 To be continued :)
