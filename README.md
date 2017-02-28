@@ -200,29 +200,22 @@ order by c.ordinal_position
 Also, there are lots Postgres-specific tables, views and functions in pg_catalog chema, such as format_type function (these are non-standard, however). Querying these tables often works faster than the standard information_schema views because the views combine multiple data sources. As we don't really need to be ANSI SQL standard-compliant, we're chosing to use native Postgres tables. Here is how we generate a `create table` statement:
 
 ```sql
-select
-	'create temporary table ' || relname || E'\n(\n' ||
-		string_agg (
-			format(E'\t%I %s %s', column_name, type, nullability), E',\n'
-			order by num
-		) ||
-	e'\n);\n' as sql
-from
-(
-	select
-		c.relname, a.attname as column_name, a.attnum as num,
-		pg_catalog.format_type(a.atttypid, a.atttypmod) as type,
-	case when a.attnotnull
-		then 'not null'
-		else 'null' 
-	end as nullability 
-	from pg_catalog.pg_class c
-		join pg_catalog.pg_attribute a on a.attrelid = c.oid and a.attnum > 0
-		join pg_catalog.pg_type t on a.atttypid = t.oid
-	where c.relname = 'complex_temp_table' and c.relpersistence = 't'
-	order by a.attnum
-) as x
-group by relname
+select format(
+	E'create temporary table %I\n(\n%s\n);\n',
+	c.relname,
+	string_agg(
+		format(E'\t%I %s %s',
+			a.attname,
+			pg_catalog.format_type(a.atttypid, a.atttypmod),
+			case when a.attnotnull then 'not null' else '' end
+		), E',\n'
+		order by a.attnum
+	)) as sql
+from pg_catalog.pg_class c
+	join pg_catalog.pg_attribute a on a.attrelid = c.oid and a.attnum > 0
+	join pg_catalog.pg_type t on a.atttypid = t.oid
+where c.relname = 'complex_temp_table' and c.relpersistence = 't'
+group by c.relname
 
 -- create temporary table complex_temp_table
 -- (
