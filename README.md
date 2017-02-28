@@ -9,10 +9,10 @@ PostgreSQL notion of temporary tables is substantially different from that of Or
 
 Porting large Oracle application relying on many temporary tables can be cumbersome:
 
-* Oracle queries may use `SCHEMA.TABLE` notion for temporary tables, which is not allowed in Postgres. We can omit `SCHEMA` if it's the same as the current user, but we are still likely to have queries that reference other schemata.
+* Oracle queries may use `schema.table` notation for temporary tables, which is not allowed in Postgres. We can omit `schema` if it's the same as the current user, but we are still likely to have queries that reference other schemata.
 * Postgres requires that each temporary table is created within the same session or transaction before it is accessed.
 
-It gets worse if the application is supposed to work with both Postgres and Oracle, so we can't just fix the queries and litter the code with lots of `CREATE TEMPORARY TABLE` statement.
+It gets worse if the application is supposed to work with both Postgres and Oracle, so we can't just fix the queries and litter the code with lots of `create temporary table` statement.
 
 # Enter pg_global_temp_tables
 
@@ -20,12 +20,12 @@ TODO: describe the API and its usage
 
 # How does it work
 
-This library combines a few ideas to emulate Oracle-style temporary tables. First, let's define a view and use it instead of a temporary table. A view is a static object and it's defined within a schema, so it supports the `SCHEMA.TABLE` notion used in our Oracle queries. A view can have `INSTEAD OF` triggers which can create temporary table as needed. There are two problems, however:
+This library combines a few ideas to emulate Oracle-style temporary tables. First, let's define a view and use it instead of a temporary table. A view is a static object and it's defined within a schema, so it supports the `schema.table` notation used in our Oracle queries. A view can have `instead of` triggers which can create temporary table as needed. There are two problems, however:
 
-* A view on a temporary table is automatically created as temporary, even if we omit the `TEMPORARY` keyword. Hence, the restrictions of temporary tables still apply, and we can use schema-qualified names.
-* There are no triggers on `SELECT`, so we can't `SELECT` from a view if the temporary table is not yet created.
+* A view on a temporary table is automatically created as temporary, even if we omit the `temporary` keyword. Hence, the restrictions of temporary tables still apply, and we can use schema-qualified names.
+* There are no triggers on `select`, so we can't `select` from a view if the temporary table is not yet created.
 
-Ok, we can't just create a `VIEW` on a temporary table, so let's explore another option: we can define a function returning a table. A function is not temporary, it's defined within a schema, it can create the temporary table as needed and select and return rows from it. The function would look like this (note the `returns table` part of the definition):
+Ok, we can't just create a view on a temporary table, so let's explore another option: we can define a function returning a table. A function is not temporary, it's defined within a schema, it can create the temporary table as needed and select and return rows from it. The function would look like this (note the `returns table` part of the definition):
 
 ```sql
 -- let's do our experiments in a separate schema
@@ -53,7 +53,7 @@ Still, it's not quite usable:
 * We have to add parentheses() after the function name, so we can't just leave Oracle queries as is, and
 * Rows returned by a function are read-only.
 
-To finally fix this, we combine both approaches, a view and a function. The view selects rows from the function, and we can make it updateable by means of the `INSTEAD OF` triggers.
+To finally fix this, we combine both approaches, a view and a function. The view selects rows from the function, and we can make it updateable by means of the `instead of` triggers.
 
 # The complete sample code of a permanent temp table
 
@@ -108,7 +108,7 @@ Finally, we can use the table just like Oracle:
 -- 2  | two
 ```
 
-One minor thing that annoys me is that pesky notice: relation already exists, skipping. We get the notice every time we access the emulated temporary table via `SELECT` or `INSERT` statements. Notices can be suppressed using the `client_min_messages` setting:
+One minor thing that annoys me is that pesky notice: relation already exists, skipping. We get the notice every time we access the emulated temporary table via `select` or `insert` statements. Notices can be suppressed using the `client_min_messages` setting:
 
 ```sql
 set client_min_messages = error
@@ -174,13 +174,13 @@ on commit drop;
 select create_permanent_temp_table(p_schema => 'stage', p_table_name => 'complex_temp_table');
 ```
 
-Inspecting the table structure to generate the `CREATE TABLE` statement involves a few queries to the `information_schema` views:
+Inspecting the table structure to generate the `create table` statement involves a few queries to the `information_schema` views:
 
 1. Table properties — `information_schema.tables`
 2. Column names and types — `information_schema.columns`
 3. Primary key — `information_schema.constraint_table_usage`, `constraint_column_usage`, `key_column_usage`.
  
-Also, there are lots Postgres-specific tables, views and functions in pg_catalog chema, such as format_type function (these are non-standard, however). What's left in terms of the input validation is to make sure that 'complex_temp_table' is a valid identifier (mind the SQL injection!), and that such relation doesn't exist in the target schema (but Postgres already does that for us automatically). Here's how to get the columns of the 'complex_temp_table' table:
+Here's how to list the columns of the 'complex_temp_table' table:
 
 ```sql
 select c.column_name, c.data_type, c.character_maximum_length,
@@ -196,5 +196,42 @@ order by c.ordinal_position
 -- name        | varchar     | 256             | null          | null
 -- date        | timestamptz | null            | null          | 0
 ```
+
+Also, there are lots Postgres-specific tables, views and functions in pg_catalog chema, such as format_type function (these are non-standard, however). Querying these tables often works faster than the standard information_schema views because the views combine multiple data sources. As we don't really need to be ANSI SQL standard-compliant, we're chosing to use native Postgres tables. Here is how we generate a `create table` statement:
+
+```sql
+select
+	'create temporary table ' || relname || E'\n(\n' ||
+		string_agg (
+			format(E'\t%I %s %s', column_name, type, nullability), E',\n'
+			order by num
+		) ||
+	e'\n);\n' as sql
+from
+(
+	select
+		c.relname, a.attname as column_name, a.attnum as num,
+		pg_catalog.format_type(a.atttypid, a.atttypmod) as type,
+	case when a.attnotnull
+		then 'not null'
+		else 'null' 
+	end as nullability 
+	from pg_catalog.pg_class c
+		join pg_catalog.pg_attribute a on a.attrelid = c.oid and a.attnum > 0
+		join pg_catalog.pg_type t on a.atttypid = t.oid
+	where c.relname = 'complex_temp_table' and c.relpersistence = 't'
+	order by a.attnum
+) as x
+group by relname
+
+-- create temporary table complex_temp_table
+-- (
+--     id bigint not null,
+--     name character varying(256) null,
+--     date timestamp(0) with time zone null
+-- );
+```
+
+(we're still missing the primary key clause). What's left in terms of the input validation is to make sure that 'complex_temp_table' is a valid identifier (mind the SQL injection!), and that such relation doesn't exist in the target schema (but Postgres already does that for us automatically).
 
 To be continued :)
