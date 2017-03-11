@@ -197,7 +197,7 @@ order by c.ordinal_position
 -- date        | timestamptz | null            | null          | 0
 ```
 
-Also, there are lots Postgres-specific tables, views and functions in pg_catalog chema, such as format_type function (these are non-standard, however). Querying these tables often works faster than the standard information_schema views because the views combine multiple data sources. As we don't really need to be ANSI SQL standard-compliant, we're chosing to use native Postgres tables. Here is how we generate a `create table` statement:
+Also, there are lots Postgres-specific tables, views and functions in pg_catalog chema, such as format_type function (these are non-standard, however). Querying these tables often works faster than the standard information_schema views because the views combine multiple data sources. As we don't really need to be ANSI SQL standard-compliant, let's use native Postgres tables. Here is how we generate a `create table` statement:
 
 ```sql
 select format(
@@ -225,6 +225,73 @@ group by c.relname
 -- );
 ```
 
-(we're still missing the primary key clause). What's left in terms of the input validation is to make sure that 'complex_temp_table' is a valid identifier (mind the SQL injection!), and that such relation doesn't exist in the target schema (but Postgres already does that for us automatically).
+The next challenge is the primary key clause. Note that keys can be compound (i.e. consisting of several columns). Primary keys are listed in `pg_constraint` table as constraints of type 'p', and `conkey` array contains table attributes making the key. Here is a query returning all primary keys and their columns of all temporary tables:
+
+```sql
+select c.relname table_name, cc.conname primary_key_name, a.attname column_name
+from pg_catalog.pg_constraint cc
+	join pg_catalog.pg_class c on c.oid = cc.conrelid
+	join pg_catalog.pg_attribute a on a.attrelid = cc.conrelid and a.attnum = any(cc.conkey)
+where cc.contype = 'p' and c.relpersistence = 't'
+order by cc.conrelid, a.attname
+
+-- table_name         | primary_key_name      | column_name
+-- -------------------+-----------------------+------------ 
+-- complex_temp_table | complex_temp_table_pk | id
+```
+
+Let's combine the two queries and get the DDL for the temporary table including the primary key clause. To make sure it handles the compound keys, let's create another temporary table with more than one primary key column:
+
+```sql
+-- sample table
+create temporary table if not exists another_temp_table
+(
+    first_name varchar,
+    last_name varchar,
+    date timestamp(0) with time zone,
+    primary key(first_name, last_name)
+)
+on commit drop;
+
+-- the combined query
+with pkey as
+(
+	select cc.conrelid, format(E',\n\tconstraint %I\n\t\tprimary key(%s)\n',
+		cc.conname, string_agg(a.attname, ', ')) pkey
+	from pg_catalog.pg_constraint cc
+		join pg_catalog.pg_class c on c.oid = cc.conrelid
+		join pg_catalog.pg_attribute a on a.attrelid = cc.conrelid and a.attnum = any(cc.conkey)
+	where cc.contype = 'p'
+	group by cc.conrelid, cc.conname
+)
+select format(
+	E'create temporary table %I\n(\n%s%s);\n',
+	c.relname,
+	string_agg(
+		format(E'\t%I %s %s',
+			a.attname,
+			pg_catalog.format_type(a.atttypid, a.atttypmod),
+			case when a.attnotnull then 'not null' else '' end
+		), E',\n'
+		order by a.attnum
+	),
+	(select pkey from pkey where pkey.conrelid = c.oid)) as sql
+from pg_catalog.pg_class c
+	join pg_catalog.pg_attribute a on a.attrelid = c.oid and a.attnum > 0
+	join pg_catalog.pg_type t on a.atttypid = t.oid
+where c.relname = 'another_temp_table' and c.relpersistence = 't'
+group by c.oid, c.relname
+
+-- create temporary table another_temp_table
+-- (
+--     first_name character varying not null,
+--     last_name character varying not null,
+--     date timestamp(0) with time zone ,
+--     constraint another_temp_table_pkey
+--         primary key(last_name, first_name)
+-- );
+```
+
+The rest of the job is straighforward: format the template code using the name of the temporary table, insert the table definition returned by the query above, and execute the generated code.
 
 To be continued :)
