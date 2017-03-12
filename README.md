@@ -325,6 +325,7 @@ begin
 
 	-- generate the final statement
 end;
-$$ language plpgsql;```
+$$ language plpgsql;
+```
 
 To be continued :)
