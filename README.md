@@ -53,7 +53,7 @@ Still, it's not quite usable:
 * We have to add parentheses() after the function name, so we can't just leave Oracle queries as is, and
 * Rows returned by a function are read-only.
 
-To finally fix this, we combine both approaches, a view and a function. The view selects rows from the function, and we can make it updateable by means of the `instead of` triggers.
+To finally fix this, we combine both approaches, a view and a function. The view selects rows from the function, and we can make it updatable by means of the `instead of` triggers.
 
 # The complete sample code of a permanent temp table
 
@@ -298,6 +298,44 @@ group by c.oid, c.relname;
 >Points of interest: `string_agg` function takes the `order by` clause to preserve the order or primary key columns and the order of table columns (these two don't always use the same order).
 
 The query also handles tables with no defined primary key (try yourself creating different temporary tables and see how it works).
+
+# Instead of insert/update/delete trigger
+
+Simple views in PostgreSQL are usually updatable by default (a view is automatically updatable if it doesn't have [joins, group by and unions](https://www.postgresql.org/docs/current/static/sql-createview.html)). But the view we created is not simple: it gets its data from a function, not from a table, so it requires the instead of triggers. All three triggers can be implemented using a single function that looks like this:
+
+```sql
+create or replace function temp_tag_idlist_iud() returns trigger as $$
+begin
+	-- temporary table definition (skipped)
+	create temporary table if not exists temp_id_name_table ...;
+
+	if tg_op = 'INSERT' then
+		insert into temp_id_name_table(id, name) 
+		values (new.id, new.name);
+		return new;
+	elsif tg_op = 'UPDATE' then
+		update temp_id_name_table 
+		set id = new.id, name = new.name
+		where id = old.id;
+		return new;
+	elsif tg_op = 'DELETE' then
+		delete from temp_id_name_table 
+		where id = old.id;
+		return old;
+	end if;
+end;
+$$ language plpgsql set client_min_messages to error;
+```
+
+Trigger function uses the built-in `tg_op` variable to distinguish between different operations handled by the trigger. To generate the important part of the trigger we need to prepare
+several lists of columns like the following:
+
+* id, name (comma-separated list of all columns)
+* new.id, new.name (comma-separated list of all columns, prepended with `new`)
+* id = new.id, name = new.name (list of `x = new.x` expressions)
+* id = old.id (list of `x = old.x` expressions, primary key columns only).
+
+We can use either `information_schema.columns` view or `pg_attributes` table to prepare these lists of columns. 
 
 # Assembling the pieces together
 
