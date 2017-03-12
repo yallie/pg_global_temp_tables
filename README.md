@@ -1,13 +1,13 @@
 # Oracle-style global temporary tables for PostgreSQL
 
-PostgreSQL notion of temporary tables is substantially different from that of Oracle.
+PostgreSQL semantic of temporary tables is substantially different from that of Oracle.
 
 * Oracle temporary tables are persistent, so their structure is static and visible to all users, and the content is temporary.
 * PostgreSQL temporary tables are dropped either at the end of a session or at the end of a transaction. In PostgreSQL, the structure and the content of a temp table is local for a database backend (a process) which created the table.
 * Oracle temporary tables are always defined within a user-specified schema.
 * PostgreSQL temporary tables cannot be defined within user's schema, they always use a special temp table schema instead.
 
-Porting large Oracle application relying on many temporary tables can be cumbersome:
+Porting large Oracle application relying on many temporary tables can be difficult:
 
 * Oracle queries may use `schema.table` notation for temporary tables, which is not allowed in Postgres. We can omit `schema` if it's the same as the current user, but we are still likely to have queries that reference other schemata.
 * Postgres requires that each temporary table is created within the same session or transaction before it is accessed.
@@ -16,7 +16,46 @@ It gets worse if the application is supposed to work with both Postgres and Orac
 
 # Enter pg_global_temp_tables
 
-TODO: describe the API and its usage
+This library creates Oracle-style temporary tables in Postgres, so that Oracle queries work without any syntax changes. Check it out:
+
+```sql
+-- Oracle application (1)
+-- 
+-- Temporary table is created like this:
+-- create global temporary table temp_idlist(id number(18)) 
+
+insert into myapp.temp_idlist(id) values(:p);
+
+select u.login 
+from myapp.users u
+join myapp.temp_idlist t on u.id = t.id;
+
+-- PostgreSQL application (2) using ordinary temporary tables
+--
+-- Temporary table is created in the same transaction 
+
+create temporary table if not exists temp_idlist(id bigint);
+insert into temp_idlist(id) values(:p);
+
+select u.login 
+from myapp.users u
+join temp_idlist t on u.id = t.id;
+
+-- PostgreSQL application (3) using pg_global_temp_tables
+--
+-- Temporary table is created like this:
+-- create temporary table temp_idlist(id bigint);
+-- create_permanent_temp_table('temp_idlist', 'myapp');
+-- commit;
+
+insert into myapp.temp_idlist(id) values(:p);
+
+select u.login 
+from myapp.users u
+join myapp.temp_idlist t on u.id = t.id;
+```
+
+Note that the usage part in (1) and (3) is exactly the same.
 
 # How does it work
 
@@ -370,7 +409,7 @@ The rest of the job is straighforward:
 * format the boilerplate code using the table name and other generated parts
 * execute the generated code.
 
-The view we're creating will have the same name as the source temporary table. So, to avoid the name conflict we'll rename the original temporary table by adding a suffix.
+The view we're creating will have the same name as the source temporary table. So, to avoid the name conflict we'll rename the original temporary table by adding a suffix. The structure of our function will be similar to this (see the repository for the full source code):
 
 ```sql
 create or replace function create_permanent_temp_table(p_table_name varchar, p_schema varchar) returns void as $$
@@ -403,69 +442,8 @@ begin
 	select ...
 	into v_old_column_list...;
 
-	-- generate the view function
-	v_final_statement := format(E'-- rename the original table to avoid the conflict
-alter table %I rename to %I;
-
--- the function to select from the temporary table 
-create or replace function %I.%I() returns table(%s) as $x$
-begin
-	-- create table statement
-%s
-
-	return query select * from %I;
-end;
-$x$ language plpgsql 
-set client_min_messages to error;\n',
-	p_table_name, v_table_name,
-	p_schema, p_table_name, v_cols_types_list,
-	v_table_statement, v_table_name);
-
-	-- generate the view
-	v_final_statement := v_final_statement || format(E'
-create or replace view %I.%I as 
-	select * from %I.%I();\n',
-	p_schema, p_table_name, p_schema, p_table_name);
-
-	-- generate the trigger function
-	v_final_statement := v_final_statement || format(E'
-create or replace function %I.%I() returns trigger as $x$
-begin
-	-- create temporary table
-%s
-
-	-- handle the trigger operation
-	if lower(tg_op) = \'insert\' then
-		insert into %I(%s) 
-		values (%s);
-		return new;
-	elsif lower(tg_op) = \'update\' then
-		update %I 
-		set %s
-		where %s;
-		return new;
-	elsif lower(tg_op) = \'delete\' then
-		delete from %I 
-		where %s;
-		return old;
-	end if;
-end;
-$x$ language plpgsql set client_min_messages to error;\n',
-	p_schema, v_trigger_name, v_table_statement, -- function header
-	v_table_name, v_all_column_list, v_new_column_list, -- insert
-	v_table_name, v_assignment_list, v_old_column_list, -- update
-	v_table_name, v_old_column_list); -- delete
-
-	-- generate the view trigger
-	v_final_statement := v_final_statement || format(E'
-drop trigger if exists %I on %I.%I;
-create trigger %I 
-	instead of insert or update or delete on %I.%I
-	for each row
-	execute procedure %I.%I();',
-	v_trigger_name, p_schema, p_table_name,
-	v_trigger_name, p_schema, p_table_name,
-	p_schema, v_trigger_name);
+	-- generate the statements to create permanent temporary table
+	v_final_statement := format(....);
 
 	-- execute the statement
 	execute v_final_statement;
@@ -473,4 +451,52 @@ end;
 $$ language plpgsql;
 ```
 
-To be continued :)
+Note: when converting a temporary table into a permanent one, we're preserving its current contents. Now let's check how it works:
+
+```sql
+create temporary table if not exists another_temp_table
+(
+    first_name varchar,
+    last_name varchar,
+    date timestamp(0) with time zone,
+    primary key(first_name, last_name)
+)
+on commit drop;
+
+-- populate the table with a few initial rows
+insert into
+	another_temp_table(first_name, last_name, date)
+values
+	('Jean-Paul', 'Sartre', date'1905-06-21'),
+	('Albert', 'Camus', date'1913-11-07');
+
+-- convert the table into the permanent one
+select create_permanent_temp_table('another_temp_table', 'stage');
+
+-- check that the contents still exists
+select * from stage.another_temp_table;
+
+-- first_name | last_name | date
+-- -----------+-----------+-------------
+-- Jean-Paul  | Sartre    | 1905-06-21
+-- Albert     | Camus     | 1913-11-07
+-- 
+-- 2 rows selected
+
+-- commit to create the permanent table
+-- note that it will discard all current rows
+commit;
+
+select * from stage.another_temp_table;
+
+-- first_name | last_name | date
+-- -----------+-----------+-------------
+-- 0 rows selected
+
+-- try insert/update/delete operations
+insert into
+	stage.another_temp_table(first_name, last_name, date)
+values
+	('Jean-Paul', 'Sartre', date'1905-06-21'),
+	('Albert', 'Camus', date'1913-11-07');
+```
