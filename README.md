@@ -290,7 +290,7 @@ group by c.oid, c.relname;
 -- (
 --     first_name character varying not null,
 --     last_name character varying not null,
---     date timestamp(0) with time zone ,
+--     date timestamp(0) with time zone,
 --     constraint another_temp_table_pkey primary key(first_name, last_name)
 -- );
 ```
@@ -301,6 +301,30 @@ The query also handles tables with no defined primary key (try yourself creating
 
 # Assembling the pieces together
 
-The rest of the job is straighforward: format the boilerplate code using the name of the temporary table, insert the table definition returned by the query above, and execute the generated code.
+The rest of the job is straighforward:
+* check if the given temporary table exists
+* format the boilerplate code using the name of the temporary table
+* insert the table definition returned by the query above
+* generate the trigger function with insert, update and delete statements
+* execute the generated code.
+
+```sql
+create or replace function create_permanent_temp_table(p_schema varchar, p_table_name varchar) returns void as $$
+declare
+	v_table_statement text;
+begin
+	-- check if the temporary table exists
+	if not exists(select 1 from pg_class where relname = p_table_name and relpersistence = 't') then
+		raise exception 'Temporary table % does not exist.', p_table_name;
+	end if;
+	
+	-- generate the temporary table statement (same as above, skipped)
+	with pkey as ...
+	select format...
+	into v_table_statement...;
+
+	-- generate the final statement
+end;
+$$ language plpgsql;```
 
 To be continued :)
