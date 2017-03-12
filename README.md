@@ -261,8 +261,7 @@ on commit drop;
 with pkey as
 (
 	select cc.conrelid, format(E',
-	constraint %I
-		primary key(%s)\n', cc.conname,
+	constraint %I primary key(%s)', cc.conname,
 		string_agg(a.attname, ', ' order by array_position(cc.conkey, a.attnum))) pkey
 	from pg_catalog.pg_constraint cc
 		join pg_catalog.pg_class c on c.oid = cc.conrelid
@@ -270,13 +269,13 @@ with pkey as
 	where cc.contype = 'p'
 	group by cc.conrelid, cc.conname
 )
-select format(E'create temporary table %I\n(\n%s%s);\n',
+select format(E'create temporary table %I\n(\n%s%s\n);\n',
 	c.relname,
 	string_agg(
-		format(E'\t%I %s %s',
+		format(E'\t%I %s%s',
 			a.attname,
 			pg_catalog.format_type(a.atttypid, a.atttypmod),
-			case when a.attnotnull then 'not null' else '' end
+			case when a.attnotnull then ' not null' else '' end
 		), E',\n'
 		order by a.attnum
 	),
@@ -292,8 +291,7 @@ group by c.oid, c.relname;
 --     first_name character varying not null,
 --     last_name character varying not null,
 --     date timestamp(0) with time zone ,
---     constraint another_temp_table_pkey
---         primary key(first_name, last_name)
+--     constraint another_temp_table_pkey primary key(first_name, last_name)
 -- );
 ```
 
