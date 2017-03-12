@@ -2,17 +2,17 @@
 
 PostgreSQL semantic of temporary tables is substantially different from that of Oracle.
 
-* Oracle temporary tables are persistent, so their structure is static and visible to all users, and the content is temporary.
+* Oracle temporary tables are permanent, so their structure is static and visible to all users, and the content is temporary.
 * PostgreSQL temporary tables are dropped either at the end of a session or at the end of a transaction. In PostgreSQL, the structure and the content of a temp table is local for a database backend (a process) which created the table.
 * Oracle temporary tables are always defined within a user-specified schema.
-* PostgreSQL temporary tables cannot be defined within user's schema, they always use a special temp table schema instead.
+* PostgreSQL temporary tables cannot be defined within user's schema, they always use a special temporary schema instead.
 
 Porting large Oracle application relying on many temporary tables can be difficult:
 
 * Oracle queries may use `schema.table` notation for temporary tables, which is not allowed in Postgres. We can omit `schema` if it's the same as the current user, but we are still likely to have queries that reference other schemata.
 * Postgres requires that each temporary table is created within the same session or transaction before it is accessed.
 
-It gets worse if the application is supposed to work with both Postgres and Oracle, so we can't just fix the queries and litter the code with lots of `create temporary table` statement.
+It gets worse if the application is supposed to work with both Postgres and Oracle, so we can't just fix the queries and litter the code with lots of `create temporary table` statements.
 
 # Enter pg_global_temp_tables
 
@@ -122,8 +122,8 @@ $$ language plpgsql;
 This approach indeed works. We can select from a function, we can access it via schema-qualified name, and we don't have to create a temporary table before accessing it:
 
 ```sql
->select * from stage.select_temp_idname()
---
+select * from stage.select_temp_idname()
+
 -- id | name
 -- ---+-----
 ```
@@ -168,19 +168,19 @@ create trigger temp_idname_insert
 Finally, we can use the table just like Oracle:
 
 ```sql
->select * from stage.temp_idname
---
+select * from stage.temp_idname
+
 -- NOTICE: 42P07: relation "test_temp_idname" already exists, skipping
 -- id | name
 -- ---+-----
 
->insert into stage.temp_idname(id, name) values (1, 'one'), (2, 'two')
---
+insert into stage.temp_idname(id, name) values (1, 'one'), (2, 'two')
+
 -- NOTICE: 42P07: relation "test_temp_idname" already exists, skipping
 -- (2 rows affected)
 
->select * from stage.temp_idname
---
+select * from stage.temp_idname
+
 -- NOTICE: 42P07: relation "test_temp_idname" already exists, skipping
 -- id | name
 -- ---+-----
@@ -442,7 +442,8 @@ group by cc.conrelid, cc.conname;
 
 # Assembling the pieces together
 
-The rest of the job is straighforward:
+The rest of the job is straightforward:
+
 * check if the given temporary table exists
 * rename the existing temporary table to avoid the conflict with the view
 * generate temporary table definition as returned by the query above
@@ -470,16 +471,16 @@ begin
 		raise exception 'Temporary table % does not exist.', p_table_name;
 	end if;
 	
-	-- generate the temporary table statement (skipped, see above)
+	-- generate the temporary table statement
 	with pkey as ...
 	select format...
 	into v_table_statement...;
 
-	-- generate the lists of columns (skipped, see above)
+	-- generate the lists of columns
 	select ...
 	into v_all_column_list, v_new_column_list, v_assignment_list...;
 
-	-- generate the list of primary key columns (skipped, see above)
+	-- generate the list of primary key columns
 	select ...
 	into v_old_column_list...;
 
@@ -514,7 +515,7 @@ values
 -- convert the table into the permanent one
 select create_permanent_temp_table('another_temp_table', 'stage');
 
--- check that the contents still exists
+-- check if the contents still exists
 select * from stage.another_temp_table;
 
 -- first_name | last_name | date
@@ -532,7 +533,7 @@ select * from stage.another_temp_table;
 
 -- first_name | last_name | date
 -- -----------+-----------+-------------
--- 0 rows selected
+-- 0 rows affected
 
 -- try insert/update/delete operations
 insert into
@@ -570,6 +571,8 @@ select * from stage.another_temp_table;
 -- -----------+-----------+-------------
 -- 0 rows selected
 ```
+
+The library also has the `drop_permanent_temp_table` function which is very simple. It just checks that two functions exists, validates that their signatures, then generates and executes two `drop function ... cascade` statements.
 
 ---
 
