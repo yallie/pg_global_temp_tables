@@ -481,7 +481,7 @@ select * from stage.another_temp_table;
 -- Jean-Paul  | Sartre    | 1905-06-21
 -- Albert     | Camus     | 1913-11-07
 -- 
--- 2 rows selected
+-- 2 rows affected
 
 -- commit to create the permanent table
 -- note that it will discard all current rows
@@ -499,4 +499,33 @@ insert into
 values
 	('Jean-Paul', 'Sartre', date'1905-06-21'),
 	('Albert', 'Camus', date'1913-11-07');
+
+-- 2 rows affected
+
+update stage.another_temp_table 
+set date = now() 
+where first_name like '%bert%';
+
+-- 1 row affected
+
+delete from stage.another_temp_table
+where last_name = 'Sartre';
+
+-- 1 row affected
+
+select * from stage.another_temp_table;
+
+-- first_name | last_name | date
+-- -----------+-----------+-------------
+-- Albert     | Camus     | 2017-03-13
+-- 
+-- 1 row affected
+
+commit;
+
+select * from stage.another_temp_table;
+
+-- first_name | last_name | date
+-- -----------+-----------+-------------
+-- 0 rows selected
 ```
