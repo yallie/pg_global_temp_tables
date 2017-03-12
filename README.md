@@ -16,7 +16,7 @@ It gets worse if the application is supposed to work with both Postgres and Orac
 
 # Enter pg_global_temp_tables
 
-This library creates Oracle-style temporary tables in Postgres, so that Oracle queries work without any syntax changes. Check it out:
+This library creates Oracle-style temporary tables in Postgres, so that Oracle queries work without any syntactic changes. Check it out:
 
 ```sql
 -- Oracle application (1)
@@ -56,6 +56,47 @@ join myapp.temp_idlist t on u.id = t.id;
 ```
 
 Note that the usage part in (1) and (3) is exactly the same.
+
+# Usage
+
+The library consists of two functions:
+
+* create_permanent_temp_table(p_table_name varchar, p_schema varchar default null)
+* drop_permanent_temp_table(p_table_name varchar, p_schema varchar default null)
+
+To create a permanent temporary table, first create an ordinary temp table and then convert it to a persistent one using the `create_permanent_temp_table` function:
+
+```sql
+create temporary table if not exists another_temp_table
+(
+    first_name varchar,
+    last_name varchar,
+    date timestamp(0) with time zone,
+    primary key(first_name, last_name)
+)
+on commit drop;
+
+-- create my_schema.another_temp_table
+select create_permanent_temp_table('another_temp_table', 'my_schema');
+
+-- or create another_temp_table in the current schema
+-- select create_permanent_temp_table('another_temp_table');
+
+-- don't forget to commit: PostgreSQL DDL is transactional
+commit;
+```
+
+To drop the emulated temporary table, use the `drop_permanent_temp_table` function:
+
+```sql
+-- drop my_schema.another_temp_table
+select drop_permanent_temp_table('another_temp_table', 'my_schema');
+
+-- or drop another_temp_table in the current schema
+-- select drop_permanent_temp_table('another_temp_table');
+
+commit;
+```
 
 # How does it work
 
