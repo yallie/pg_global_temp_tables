@@ -174,7 +174,9 @@ on commit drop;
 select create_permanent_temp_table(p_schema => 'stage', p_table_name => 'complex_temp_table');
 ```
 
-Inspecting the table structure to generate the `create table` statement involves a few queries to the `information_schema` views:
+# Reverse engineering a temporary table
+
+Inspecting the table structure to generate the `create table` statement usually involves a few queries to the `information_schema` views:
 
 1. Table properties — `information_schema.tables`
 2. Column names and types — `information_schema.columns`
@@ -225,7 +227,7 @@ group by c.relname
 -- );
 ```
 
-The next challenge is the primary key clause. Note that keys can be compound (i.e. consisting of several columns). Primary keys are listed in `pg_constraint` table as constraints of type 'p', and `conkey` array contains table attributes making the key. Here is a query returning all primary keys and their columns of all temporary tables:
+The next challenge is the primary key clause. Note that keys can be compound (i.e. consisting of several columns). Primary keys are listed in `pg_constraint` table as constraints of type 'p', and `conkey` array contains table attributes making the key. Here is a query returning the primary keys and their columns of all temporary tables:
 
 ```sql
 select c.relname table_name, cc.conname primary_key_name, a.attname column_name
@@ -240,7 +242,9 @@ order by cc.conrelid, a.attname
 -- complex_temp_table | complex_temp_table_pk | id
 ```
 
-Let's combine the two queries and get the DDL for the temporary table including the primary key clause. To make sure it handles the compound keys, let's create another temporary table with more than one primary key column:
+>Points of interest: `pg_attribute` join condition includes `any` clause which means that we look for `attnum` values listed in the `conkey` array: `a.attnum = any(cc.conkey)`.
+
+Finally, let's combine the two queries to get the table definition including the primary key. To make sure it handles the compound keys, let's create another temporary table with more than one primary key column:
 
 ```sql
 -- sample table
@@ -256,16 +260,17 @@ on commit drop;
 -- the combined query
 with pkey as
 (
-	select cc.conrelid, format(E',\n\tconstraint %I\n\t\tprimary key(%s)\n',
-		cc.conname, string_agg(a.attname, ', ')) pkey
+	select cc.conrelid, format(E',
+	constraint %I
+		primary key(%s)\n', cc.conname,
+		string_agg(a.attname, ', ' order by array_position(cc.conkey, a.attnum))) pkey
 	from pg_catalog.pg_constraint cc
 		join pg_catalog.pg_class c on c.oid = cc.conrelid
 		join pg_catalog.pg_attribute a on a.attrelid = cc.conrelid and a.attnum = any(cc.conkey)
 	where cc.contype = 'p'
 	group by cc.conrelid, cc.conname
 )
-select format(
-	E'create temporary table %I\n(\n%s%s);\n',
+select format(E'create temporary table %I\n(\n%s%s);\n',
 	c.relname,
 	string_agg(
 		format(E'\t%I %s %s',
@@ -280,7 +285,7 @@ from pg_catalog.pg_class c
 	join pg_catalog.pg_attribute a on a.attrelid = c.oid and a.attnum > 0
 	join pg_catalog.pg_type t on a.atttypid = t.oid
 where c.relname = 'another_temp_table' and c.relpersistence = 't'
-group by c.oid, c.relname
+group by c.oid, c.relname;
 
 -- create temporary table another_temp_table
 -- (
@@ -288,10 +293,16 @@ group by c.oid, c.relname
 --     last_name character varying not null,
 --     date timestamp(0) with time zone ,
 --     constraint another_temp_table_pkey
---         primary key(last_name, first_name)
+--         primary key(first_name, last_name)
 -- );
 ```
 
-The rest of the job is straighforward: format the template code using the name of the temporary table, insert the table definition returned by the query above, and execute the generated code.
+>Points of interest: `string_agg` function takes the `order by` clause to preserve the order or primary key columns and the order of table columns (these two don't always use the same order).
+
+The query also handles tables with no defined primary key (try yourself creating different temporary tables and see how it works).
+
+# Assembling the pieces together
+
+The rest of the job is straighforward: format the boilerplate code using the name of the temporary table, insert the table definition returned by the query above, and execute the generated code.
 
 To be continued :)
