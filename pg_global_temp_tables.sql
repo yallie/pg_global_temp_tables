@@ -1,4 +1,9 @@
-﻿create or replace function create_permanent_temp_table(
+﻿-- pg_global_temp_tables
+--
+-- Emulates Oracle-style global temporary tables in PostgreSQL
+-- Written by Alexey Yakovlev <yallie@yandex.ru>
+
+create or replace function create_permanent_temp_table(
 	p_table_name varchar,
 	p_schema varchar default null)
 returns void as $$
