@@ -332,34 +332,74 @@ several lists of columns like the following:
 
 * id, name (comma-separated list of all columns)
 * new.id, new.name (comma-separated list of all columns, prepended with `new`)
-* id = new.id, name = new.name (list of `x = new.x` expressions)
-* id = old.id (list of `x = old.x` expressions, primary key columns only).
+* id = new.id, name = new.name (list of `x = new.x` expressions for all columns)
+* id = old.id (list of `x = old.x` expressions, primary key columns only)
+* id bigint, name varchar (list of all columns and their types).
 
-We can use either `information_schema.columns` view or `pg_attributes` table to prepare these lists of columns. 
+We can use either `information_schema.columns` view or `pg_attributes` table to prepare these lists of columns:
+
+```sql
+-- generate the lists of columns
+select
+	string_agg(a.attname, ', ') as all_columns,
+	string_agg(format('new.%I', a.attname), ', ') as new_columns,
+	string_agg(format('%I = new.%I', a.attname, a.attname), ', ') as assignments,
+	string_agg(format('%I %s', a.attname, 
+		pg_catalog.format_type(a.atttypid, a.atttypmod)), ', ') as column_types
+from pg_catalog.pg_class c
+	join pg_catalog.pg_attribute a on a.attrelid = c.oid and a.attnum > 0
+where c.relname = 'another_temp_table' and c.relpersistence = 't';
+
+-- generate the list of primary key columns
+select string_agg(format('%I = old.%I', a.attname, a.attname), ', ' 
+	order by array_position(cc.conkey, a.attnum)) as old_columns
+from pg_catalog.pg_constraint cc
+	join pg_catalog.pg_class c on c.oid = cc.conrelid
+	join pg_catalog.pg_attribute a on a.attrelid = cc.conrelid and a.attnum = any(cc.conkey)
+where cc.contype = 'p' and c.relname = 'another_temp_table' and c.relpersistence = 't'
+group by cc.conrelid, cc.conname;
+```
 
 # Assembling the pieces together
 
 The rest of the job is straighforward:
 * check if the given temporary table exists
-* format the boilerplate code using the name of the temporary table
-* insert the table definition returned by the query above
+* rename the existing temporary table to avoid the conflict with the view
+* generate temporary table definition as returned by the query above
 * generate the trigger function with insert, update and delete statements
+* format the boilerplate code using the table name and other generated parts
 * execute the generated code.
 
+The view we're creating will have the same name as the source temporary table. So, to avoid the name conflict we'll rename the original temporary table by adding a suffix.
+
 ```sql
-create or replace function create_permanent_temp_table(p_schema varchar, p_table_name varchar) returns void as $$
+create or replace function create_permanent_temp_table(p_table_name varchar, p_schema varchar) returns void as $$
 declare
+	v_table_name varchar := p_table_name || '$tmp';
 	v_table_statement text;
+	v_all_column_list text;
+	v_new_column_list text;
+	v_assignment_list text;
+	v_cols_types_list text;
+	v_old_column_list text;
 begin
 	-- check if the temporary table exists
 	if not exists(select 1 from pg_class where relname = p_table_name and relpersistence = 't') then
 		raise exception 'Temporary table % does not exist.', p_table_name;
 	end if;
 	
-	-- generate the temporary table statement (same as above, skipped)
+	-- generate the temporary table statement (skipped, see above)
 	with pkey as ...
 	select format...
 	into v_table_statement...;
+
+	-- generate the lists of columns (skipped, see above)
+	select ...
+	into v_all_column_list, v_new_column_list, v_assignment_list...;
+
+	-- generate the list of primary key columns (skipped, see above)
+	select ...
+	into v_old_column_list...;
 
 	-- generate the final statement
 end;
