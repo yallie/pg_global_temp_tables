@@ -8,6 +8,7 @@ create or replace function create_permanent_temp_table(
 	p_schema varchar default null)
 returns void as $$
 declare
+	-- https://github.com/yallie/pg_global_temp_tables
 	v_table_name varchar := p_table_name || '$tmp';
 	v_trigger_name varchar := p_table_name || '$iud';
 	v_final_statement text;
@@ -20,7 +21,9 @@ declare
 begin
 	-- check if the temporary table exists
 	if not exists(select 1 from pg_class where relname = p_table_name and relpersistence = 't') then
-		raise exception 'Temporary table % does not exist.', p_table_name;
+		raise exception 'Temporary table % does not exist. %', p_table_name, 'Create an ordinary temp ' ||
+			'table first, then use create_permanent_temp_table function to convert it to a permanent one.'
+			using errcode = 'UTMP1';
 	end if;
 
 	-- make sure that the schema is defined
@@ -157,6 +160,7 @@ create or replace function drop_permanent_temp_table(
 	p_schema varchar default null)
 returns void as $$
 declare
+	-- https://github.com/yallie/pg_global_temp_tables
 	v_table_name varchar := p_table_name || '$tmp';
 	v_trigger_name varchar := p_table_name || '$iud';
 	v_count int;
@@ -177,7 +181,9 @@ begin
 		p.prosrc like '%pg_global_temp_tables%';
 
 	if v_count <> 2 then
-		raise exception 'The table %.% does not seem to be persistent temporary table.', p_schema, p_table_name;
+		raise exception 'The table %.% does not seem to be persistent temporary table. %', p_schema,
+			p_table_name, 'The function only supports tables created by pg_global_temp_tables library.'
+			using errcode = 'UTMP2';
 	end if;
 
 	-- generate the drop function statements
