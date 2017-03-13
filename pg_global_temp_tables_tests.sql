@@ -9,7 +9,7 @@
 
 create or replace function test_case_pg_global_temp_tables_create_fails_on_nonexistent() returns void as $$
 begin
-	-- use begin..exception block to simulate the autonomous transaction
+	-- use begin..exception block to simulate the inner transaction
 	begin
 		perform create_permanent_temp_table('pg_global_temp_tables_nonexistent_table');
 
@@ -20,13 +20,14 @@ begin
 			raise notice 'OK, transaction rolled back';
 	end;
 end;
-$$ language plpgsql set search_path from current;
+$$ language plpgsql
+set search_path from current;
 
 create or replace function test_case_pg_global_temp_tables_create_succeeds() returns void as $$
 declare
 	v_count int;
 begin
-	-- use begin..exception block to simulate the autonomous transaction
+	-- use begin..exception block to simulate the inner transaction
 	begin
 		create temporary table if not exists pg_global_temp_tables_test_table
 		(
@@ -91,11 +92,12 @@ begin
 			raise notice 'OK, transaction rolled back';
 	end;
 end;
-$$ language plpgsql set search_path from current;
+$$ language plpgsql
+set search_path from current;
 
 create or replace function test_case_pg_global_temp_tables_drop_fails_on_nonexistent_table() returns void as $$
 begin
-	-- use begin..exception block to simulate the autonomous transaction
+	-- use begin..exception block to simulate the inner transaction
 	begin
 		perform drop_permanent_temp_table('pg_global_temp_tables_nonexistent_table');
 
@@ -106,11 +108,12 @@ begin
 			raise notice 'OK, transaction rolled back';
 	end;
 end;
-$$ language plpgsql set search_path from current;
+$$ language plpgsql
+set search_path from current;
 
 create or replace function test_case_pg_global_temp_tables_drop_succeeds() returns void as $$
 begin
-	-- use begin..exception block to simulate the autonomous transaction
+	-- use begin..exception block to simulate the inner transaction
 	begin
 		create temporary table if not exists pg_global_temp_tables_test_table
 		(
@@ -124,10 +127,11 @@ begin
 		perform drop_permanent_temp_table('pg_global_temp_tables_test_table');
 
 		-- roll back all changes, including the created database objects
-		raise exception 'Failed' using errcode = 'UTEST';
+		raise exception 'OK' using errcode = 'UTEST';
 	exception
 		when sqlstate 'UTEST' then
 			raise notice 'OK, transaction rolled back';
 	end;
 end;
-$$ language plpgsql set search_path from current;
+$$ language plpgsql
+set search_path from current;
