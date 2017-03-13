@@ -574,6 +574,21 @@ select * from stage.another_temp_table;
 
 The library also has the `drop_permanent_temp_table` function which is very simple. It just checks that two functions exists, validates that their signatures, then generates and executes two `drop function ... cascade` statements.
 
+# Unit tests
+
+Unit tests for the library use [PGUnit framework](https://github.com/adrianandrei-ca/pgunit) installed in the dedicated `pgunit` schema. Make sure to create the test functions in the same schema as the library functions. To run all tests, use the following code:
+
+```sql
+select * from pgunit.test_run_suite('pg_global_temp_tables');
+
+-- test_name                                 | suc... | failed | err...| err...| duration
+---------------------------------------------+--------+--------+-------+-------+-----------------
+-- test_case_pg_global_temp_tables_create_f..| 1      | 0      | 0     | OK    | 00:00:00.0137540
+-- test_case_pg_global_temp_tables_create_s..| 1      | 0      | 0     | OK    | 00:00:00.1048550
+-- test_case_pg_global_temp_tables_drop_fai..| 1      | 0      | 0     | OK    | 00:00:00.0153330
+-- test_case_pg_global_temp_tables_drop_suc..| 1      | 0      | 0     | OK    | 00:00:00.1008250
+```
+ 
 ---
 
 # Copyright and License
