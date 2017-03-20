@@ -17,7 +17,8 @@ declare
 	v_new_column_list text; -- new.id, new.name, ...
 	v_assignment_list text; -- id = new.id, name = new.name, ...
 	v_cols_types_list text; -- id bigint, name varchar, ...
-	v_old_column_list text; -- id = old.id
+	v_old_column_list text; -- id = old.id, name = old.name, ...
+	v_old_pkey_column text; -- id = old.id
 begin
 	-- check if the temporary table exists
 	if not exists(select 1 from pg_class where relname = p_table_name and relpersistence = 't') then
@@ -66,9 +67,10 @@ begin
 		string_agg(a.attname, ', '),
 		string_agg(format('new.%I', a.attname), ', '),
 		string_agg(format('%I = new.%I', a.attname, a.attname), ', '),
-		string_agg(format('%I %s', a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod)), ', ')
+		string_agg(format('%I %s', a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod)), ', '),
+		string_agg(format('%I = old.%I', a.attname, a.attname), ' and ')
 	into
-		v_all_column_list, v_new_column_list, v_assignment_list, v_cols_types_list
+		v_all_column_list, v_new_column_list, v_assignment_list, v_cols_types_list, v_old_column_list
 	from pg_catalog.pg_class c
 		join pg_catalog.pg_attribute a on a.attrelid = c.oid and a.attnum > 0
 		join pg_catalog.pg_type t on a.atttypid = t.oid
@@ -77,12 +79,17 @@ begin
 	-- generate the list of primary key columns
 	select string_agg(format('%I = old.%I', a.attname, a.attname), ' and ' 
 		order by array_position(cc.conkey, a.attnum))
-	into v_old_column_list
+	into v_old_pkey_column
 	from pg_catalog.pg_constraint cc
 		join pg_catalog.pg_class c on c.oid = cc.conrelid
 		join pg_catalog.pg_attribute a on a.attrelid = cc.conrelid and a.attnum = any(cc.conkey)
 	where cc.contype = 'p' and c.relname = p_table_name and c.relpersistence = 't'
 	group by cc.conrelid, cc.conname;
+
+	-- if primary key is defined, use the primary key columns
+	if length(v_old_pkey_column) > 0 then
+		v_old_column_list := v_old_pkey_column;
+	end if;
 
 	-- generate the view function
 	v_final_statement := format(E'-- rename the original table to avoid the conflict
