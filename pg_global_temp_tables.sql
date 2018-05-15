@@ -47,10 +47,11 @@ begin
 	select format(E'\tcreate temporary table if not exists %I\n\t(\n%s%s\n\t)\n\ton commit drop;',
 		v_table_name,
 		string_agg(
-			format(E'\t\t%I %s%s',
+			format(E'\t\t%I %s%s%s',
 				a.attname,
 				pg_catalog.format_type(a.atttypid, a.atttypmod),
-				case when a.attnotnull then ' not null' else '' end
+				case when a.attnotnull then ' not null' else '' end,
+			        case when a.atthasdef = true then ' default ' || pg_get_expr(d.adbin, d.adrelid) else '' end
 			), E',\n'
 			order by a.attnum
 		),
@@ -58,6 +59,7 @@ begin
 	into v_table_statement
 	from pg_catalog.pg_class c
 		join pg_catalog.pg_attribute a on a.attrelid = c.oid and a.attnum > 0
+		left outer join pg_catalog.pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
 		join pg_catalog.pg_type t on a.atttypid = t.oid
 	where c.relname = p_table_name and c.relpersistence = 't'
 	group by c.oid, c.relname;
@@ -65,7 +67,7 @@ begin
 	-- generate the lists of columns
 	select
 		string_agg(a.attname, ', '),
-		string_agg(format('new.%I', a.attname), ', '),
+		string_agg(format('%s', case when a.atthasdef = true then 'coalesce(new.' || a.attname || ', ' || pg_get_expr(d.adbin, d.adrelid) || ')' else 'new.' || a.attname end), ', '),
 		string_agg(format('%I = new.%I', a.attname, a.attname), ', '),
 		string_agg(format('%I %s', a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod)), ', '),
 		string_agg(format('%I = old.%I', a.attname, a.attname), ' and ')
@@ -82,6 +84,7 @@ begin
 	into v_old_pkey_column
 	from pg_catalog.pg_constraint cc
 		join pg_catalog.pg_class c on c.oid = cc.conrelid
+		left outer join pg_catalog.pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
 		join pg_catalog.pg_attribute a on a.attrelid = cc.conrelid and a.attnum = any(cc.conkey)
 	where cc.contype = 'p' and c.relname = p_table_name and c.relpersistence = 't'
 	group by cc.conrelid, cc.conname;
