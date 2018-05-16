@@ -207,3 +207,65 @@ begin
 end;
 $$ language plpgsql
 set search_path from current;
+
+create or replace function test_case_pg_global_temp_tables_with_default_value() returns void as $$
+declare
+	v_rec RECORD;
+begin
+	-- use begin..exception block to simulate the inner transaction
+	begin
+		create temporary table if not exists pg_global_temp_tables_test_table
+		(
+			id bigint primary key,
+			varchar_without_def varchar,
+			varchar_with_def varchar default 'def_varchar',
+			integer_with_def integer default 1,
+			numeric_with_def numeric(4,1) default 201.8,
+			date_with_def date default date'2018-01-01',
+			timestamp_with_def timestamp default timestamp'2018-01-01 10:00:00.000'
+		);
+
+		perform create_permanent_temp_table('pg_global_temp_tables_test_table');
+
+		-- only insert the primary key 
+		insert into
+			pg_global_temp_tables_test_table(id)
+		values
+			(1);
+
+		-- check default values
+		select *
+		into v_rec
+		from pg_global_temp_tables_test_table where id = 1;
+		perform pgunit.test_assertTrue('varchar_without_def should be [null] when not set', v_rec.varchar_without_def is null);
+		perform pgunit.test_assertTrue('varchar_with_def should be [def_varchar] when not set', v_rec.varchar_with_def = 'def_varchar');
+		perform pgunit.test_assertTrue('integer_with_def should be [1] when not set', v_rec.integer_with_def = 1);
+		perform pgunit.test_assertTrue('numeric_with_def should be [201.8] when not set', v_rec.numeric_with_def = 201.8);
+		perform pgunit.test_assertTrue('date_with_def should be [2018-01-01] when not set', v_rec.date_with_def = date'2018-01-01');
+		perform pgunit.test_assertTrue('timestamp_with_def should be [2018-01-01 10:00:00.000] when not set', v_rec.timestamp_with_def = timestamp'2018-01-01 10:00:00.000');
+
+		-- insert all values 
+		insert into
+			pg_global_temp_tables_test_table(id, varchar_without_def, varchar_with_def, integer_with_def, numeric_with_def, date_with_def, timestamp_with_def)
+		values
+			(2, 'inserted_varchar', 'inserted_varchar2', 2, 202.8, date'2018-01-02', timestamp'2018-01-02 10:00:00.000');
+		-- check inserted values
+		select *
+		into v_rec
+		from pg_global_temp_tables_test_table where id = 2;
+		perform pgunit.test_assertTrue('varchar_without_def should be [inserted_varchar] when set', v_rec.varchar_without_def = 'inserted_varchar');
+		perform pgunit.test_assertTrue('varchar_with_def should be [inserted_varchar2] when set', v_rec.varchar_with_def = 'inserted_varchar2');
+		perform pgunit.test_assertTrue('integer_with_def should be [2] when set', v_rec.integer_with_def = 2);
+		perform pgunit.test_assertTrue('numeric_with_def should be [201.9] when set', v_rec.numeric_with_def = 202.8);
+		perform pgunit.test_assertTrue('date_with_def should be [2018-01-02] when set', v_rec.date_with_def = date'2018-01-02');
+		perform pgunit.test_assertTrue('timestamp_with_def should be [2018-01-02 10:00:00.000] when set', v_rec.timestamp_with_def = timestamp'2018-01-02 10:00:00.000');
+
+		-- roll back all changes, including the created database objects
+		raise exception 'OK' using errcode = 'UTEST';
+	exception
+		when sqlstate 'UTEST' then
+			raise notice 'OK, transaction rolled back';
+	end;
+end;
+$$ language plpgsql
+set search_path from current;
