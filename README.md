@@ -102,7 +102,7 @@ commit;
 
 This library combines a few ideas to emulate Oracle-style temporary tables. First, let's define a view and use it instead of a temporary table. A view is a static object and it's defined within a schema, so it supports the `schema.table` notation used in our Oracle queries. A view can have `instead of` triggers which can create temporary table as needed. There are two problems, however:
 
-* A view on a temporary table is automatically created as temporary, even if we omit the `temporary` keyword. Hence, the restrictions of temporary tables still apply, and we can use schema-qualified names.
+* A view on a temporary table is automatically created as temporary, even if we omit the `temporary` keyword. Hence, the restrictions of temporary tables still apply, and we can't use schema-qualified names.
 * There are no triggers on `select`, so we can't `select` from a view if the temporary table is not yet created.
 
 Ok, we can't just create a view on a temporary table, so let's explore another option: we can define a function returning a table. A function is not temporary, it's defined within a schema, it can create the temporary table as needed and select and return rows from it. The function would look like this (note the `returns table` part of the definition):
