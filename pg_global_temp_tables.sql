@@ -75,6 +75,7 @@ begin
 		v_all_column_list, v_new_column_list, v_assignment_list, v_cols_types_list, v_old_column_list
 	from pg_catalog.pg_class c
 		join pg_catalog.pg_attribute a on a.attrelid = c.oid and a.attnum > 0
+		left outer join pg_catalog.pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
 		join pg_catalog.pg_type t on a.atttypid = t.oid
 	where c.relname = p_table_name and c.relpersistence = 't';
 
@@ -84,8 +85,8 @@ begin
 	into v_old_pkey_column
 	from pg_catalog.pg_constraint cc
 		join pg_catalog.pg_class c on c.oid = cc.conrelid
-		left outer join pg_catalog.pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
 		join pg_catalog.pg_attribute a on a.attrelid = cc.conrelid and a.attnum = any(cc.conkey)
+		left outer join pg_catalog.pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
 	where cc.contype = 'p' and c.relname = p_table_name and c.relpersistence = 't'
 	group by cc.conrelid, cc.conname;
 
