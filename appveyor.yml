@@ -1,0 +1,31 @@
+﻿version: 1.0.{build}
+
+services: postgresql96
+
+build:
+  verbosity: minimal
+
+install:
+  - git clone https://github.com/adrianandrei-ca/pgunit.git c:\projects\pgunit
+
+build_script:
+  - SET PGUSER=postgres
+  - SET PGPASSWORD=Password12!
+  - PATH=C:\Program Files\PostgreSQL\9.6\bin\;%PATH%
+  - createdb pg_tmp
+  - echo 'set search_path to pgunit,public; set pgunit.dblink_conn_extra=''hostaddr=127.0.0.1 port=5432 user=postgres password=Password12!'';' >> %HOMEPATH%/.psqlrc
+  - psql -d pg_tmp -q -c "create schema pgunit"
+  - psql -d pg_tmp -q -c "create extension dblink schema pgunit"
+  - psql -d pg_tmp -q -f c:\projects\pgunit\PGUnit.sql
+  - psql -d pg_tmp -q -f pg_global_temp_tables.sql
+  - psql -d pg_tmp -q -f pg_global_temp_tables_tests.sql
+
+test_script:
+  - psql -d pg_tmp -a -c "select * from test_run_all()"
+  - #have to run all tests one by one
+  - #psql -d pg_tmp -a -c "select test_case_pg_global_temp_tables_create_fails_on_nonexistent()"
+  - #psql -d pg_tmp -a -c "select test_case_pg_global_temp_tables_create_succeeds_with_pkey()"
+  - #psql -d pg_tmp -a -c "select test_case_pg_global_temp_tables_create_succeeds_without_pkey()"
+  - #psql -d pg_tmp -a -c "select test_case_pg_global_temp_tables_drop_fails_on_nonexistent_table()"
+  - #psql -d pg_tmp -a -c "select test_case_pg_global_temp_tables_drop_succeeds()"
+  - #psql -d pg_tmp -a -c "select test_case_pg_global_temp_tables_with_default_value()"

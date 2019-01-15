@@ -1,5 +1,7 @@
 # Oracle-style global temporary tables for PostgreSQL
 
+[![Build status](https://ci.appveyor.com/api/projects/status/ogjn6bc2avxg66jl?svg=true)](https://ci.appveyor.com/project/yallie/pg-global-temp-tables)
+
 PostgreSQL semantic of temporary tables is substantially different from that of Oracle.
 
 * Oracle temporary tables are permanent, so their structure is static and visible to all users, and the content is temporary.
